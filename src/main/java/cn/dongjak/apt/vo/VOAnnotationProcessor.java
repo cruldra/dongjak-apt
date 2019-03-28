@@ -3,16 +3,14 @@ package cn.dongjak.apt.vo;
 import cn.dongjak.annotations.DbComment;
 import cn.dongjak.annotations.VO;
 import com.google.auto.service.AutoService;
-import com.squareup.javapoet.AnnotationSpec;
-import com.squareup.javapoet.FieldSpec;
-import com.squareup.javapoet.JavaFile;
-import com.squareup.javapoet.TypeSpec;
+import com.squareup.javapoet.*;
 import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.apache.commons.lang3.ArrayUtils;
 
 import javax.annotation.processing.AbstractProcessor;
 import javax.annotation.processing.Filer;
@@ -105,11 +103,11 @@ public class VOAnnotationProcessor extends AbstractProcessor {
             voBuilder.addAnnotation(AnnotationSpec.builder(ApiModel.class).addMember("value", "$S", dbComment.value()).build());
 
         List<Element> fields = element.getEnclosedElements().stream().filter(o -> {
-            return o.getKind().isField();
+            return o.getKind().isField() && !ArrayUtils.contains(vo.excludes(), o.getSimpleName().toString());
         }).collect(Collectors.toList());
 
         fields.forEach(field -> {
-            FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(String.class, field.getSimpleName().toString(), Modifier.PRIVATE);
+            FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(ClassName.bestGuess(field.asType().toString()), field.getSimpleName().toString(), Modifier.PRIVATE);
             DbComment fieldComment = field.getAnnotation(DbComment.class);
             if (Objects.nonNull(fieldComment))
                 fieldSpecBuilder.addAnnotation(AnnotationSpec.builder(ApiModelProperty.class).addMember("value", "$S", fieldComment.value()).build());
