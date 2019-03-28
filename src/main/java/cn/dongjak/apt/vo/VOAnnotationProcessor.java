@@ -13,7 +13,6 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.apache.commons.lang3.ArrayUtils;
 
 import javax.annotation.processing.AbstractProcessor;
 import javax.annotation.processing.Filer;
@@ -25,11 +24,8 @@ import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
 import javax.tools.Diagnostic;
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.util.*;
 import java.util.stream.Collectors;
-
-import static org.reflections.ReflectionUtils.getAllFields;
 
 /**
  * 每一个注解处理器类都必须有一个空的构造函数，默认不写就行;
@@ -104,40 +100,34 @@ public class VOAnnotationProcessor extends AbstractProcessor {
         voBuilder.addAnnotation(AllArgsConstructor.class);
         voBuilder.addAnnotation(Builder.class);
 
-        try {
-            Class c = Class.forName(element.asType().toString());
-            DbComment dbComment = (DbComment) c.getAnnotation(DbComment.class);
-            if (Objects.nonNull(dbComment))
-                voBuilder.addAnnotation(AnnotationSpec.builder(ApiModel.class).addMember("value", "$S", dbComment.value()).build());
-            List<Field> fields = getAllFields(c).stream().filter(field -> {
-                return !ArrayUtils.contains(vo.excludes(), field.getName());
-            }).collect(Collectors.toList());
+        DbComment dbComment = element.getAnnotation(DbComment.class);
+        if (Objects.nonNull(dbComment))
+            voBuilder.addAnnotation(AnnotationSpec.builder(ApiModel.class).addMember("value", "$S", dbComment.value()).build());
 
-            fields.forEach(field -> {
-                FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(field.getType(), field.getName(), Modifier.PRIVATE);
-                DbComment fieldComment = field.getAnnotation(DbComment.class);
-                if (Objects.nonNull(fieldComment))
-                    fieldSpecBuilder.addAnnotation(AnnotationSpec.builder(ApiModelProperty.class).addMember("value", "$S", fieldComment.value()).build());
-                voBuilder.addField(fieldSpecBuilder.build());
-            });
+        List<Element> fields = element.getEnclosedElements().stream().filter(o -> {
+            return o.getKind().isField();
+        }).collect(Collectors.toList());
 
-            TypeSpec validationGroupsInterface = voBuilder.addModifiers(Modifier.PUBLIC)
-                    .build();
+        fields.forEach(field -> {
+            FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(String.class, field.getSimpleName().toString(), Modifier.PRIVATE);
+            DbComment fieldComment = field.getAnnotation(DbComment.class);
+            if (Objects.nonNull(fieldComment))
+                fieldSpecBuilder.addAnnotation(AnnotationSpec.builder(ApiModelProperty.class).addMember("value", "$S", fieldComment.value()).build());
+            voBuilder.addField(fieldSpecBuilder.build());
+        });
 
-            JavaFile javaFile = JavaFile.builder(
-                    element.getEnclosingElement().toString(), validationGroupsInterface).
-                    build();
+        TypeSpec validationGroupsInterface = voBuilder.addModifiers(Modifier.PUBLIC)
+                .build();
 
-            //生成したソースを確認したいので、コンソールに直接出力してみる
-            System.out.println();
-            System.out.println(javaFile);
+        JavaFile javaFile = JavaFile.builder(
+                element.getEnclosingElement().toString(), validationGroupsInterface).
+                build();
 
-            javaFile.writeTo(_filer);
+        //生成したソースを確認したいので、コンソールに直接出力してみる
+        System.out.println();
+        System.out.println(javaFile);
 
-        } catch (ClassNotFoundException e) {
-            e.printStackTrace();
-        }
-
+        javaFile.writeTo(_filer);
 
     }
 
