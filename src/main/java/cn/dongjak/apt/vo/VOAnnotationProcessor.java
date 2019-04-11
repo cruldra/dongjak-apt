@@ -104,7 +104,7 @@ public class VOAnnotationProcessor extends AbstractProcessor {
         DbComment dbComment = element.getAnnotation(DbComment.class);
         if (Objects.nonNull(dbComment))
             voBuilder.addAnnotation(AnnotationSpec.builder(ApiModel.class).addMember("value", "$S", dbComment.value()).build());
-
+        StringBuilder codeBuilder = new StringBuilder("return $T.builder()");
         List<Element> fields = element.getEnclosedElements().stream().filter(o -> {
             return o.getKind().isField() && !ArrayUtils.contains(vo.excludes(), o.getSimpleName().toString()) && Objects.isNull(((Element) o).getAnnotation(VO.Exclude.class));
         }).collect(Collectors.toList());
@@ -115,6 +115,8 @@ public class VOAnnotationProcessor extends AbstractProcessor {
             if (Objects.nonNull(fieldComment))
                 fieldSpecBuilder.addAnnotation(AnnotationSpec.builder(ApiModelProperty.class).addMember("value", "$S", fieldComment.value()).build());
             voBuilder.addField(fieldSpecBuilder.build());
+            codeBuilder.append("\n").append(".").append(field.getSimpleName()).append("(").append("domain.").append(ElementUtils.getReadMethodName(field)).append("()").append(")");
+
         });
 
         Arrays.stream(vo.fields()).forEach(voField -> {
@@ -122,21 +124,30 @@ public class VOAnnotationProcessor extends AbstractProcessor {
             Element fieldElement = ElementUtils.streamingGetElement(element, expression);
             FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(ClassName.bestGuess(fieldElement.asType().toString()), fieldElement.getSimpleName().toString(), Modifier.PRIVATE);
             voBuilder.addField(fieldSpecBuilder.build());
-            //Field field = ReflectUtils.streamingGetField()
-
-//            FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(ClassName.bestGuess(field.asType().toString()), field.getSimpleName().toString(), Modifier.PRIVATE);
-            //ReflectUtils.strea
-
-            //valueMap.put(screenProperty.name(), ReflectUtils.streamingGet(value, expression));
-
+            codeBuilder.append("\n").append(".").append(fieldElement.getSimpleName()).append("(").append("domain").append(ElementUtils.getReadExpression(expression)).append(")");
         });
+        codeBuilder.append("\n.build()");
+        String packageName = StringUtils.isNotBlank(vo.packageName()) ? vo.packageName() :
+                element.getEnclosingElement().toString();
+
+
+        voBuilder.addMethod(MethodSpec.methodBuilder("from").addModifiers(Modifier.PUBLIC, Modifier.STATIC)
+                .returns(ClassName.get(packageName, className))
+                .addParameter(ClassName.bestGuess(element.asType().toString()), "domain")
+                .addStatement(codeBuilder.toString(), ClassName.get(packageName, className))
+                .build());
+
+
+        voBuilder.addMethod(MethodSpec.methodBuilder("fromCollection").addModifiers(Modifier.PUBLIC, Modifier.STATIC)
+                .returns(ParameterizedTypeName.get(ClassName.bestGuess("java.util.Collection"), ClassName.get(packageName, className)))
+                .addParameter(ParameterizedTypeName.get(ClassName.bestGuess("java.util.Collection"), ClassName.bestGuess(element.asType().toString())), "collection")
+                .addStatement("return collection.stream().map($T::from).collect($T.toList())", ClassName.get(packageName, className), ClassName.bestGuess("java.util.stream.Collectors"))
+                .build());
 
         TypeSpec validationGroupsInterface = voBuilder.addModifiers(Modifier.PUBLIC)
                 .build();
 
-        JavaFile javaFile = JavaFile.builder(
-                StringUtils.isNotBlank(vo.packageName()) ? vo.packageName() :
-                        element.getEnclosingElement().toString(), validationGroupsInterface).
+        JavaFile javaFile = JavaFile.builder(packageName, validationGroupsInterface).
                 build();
 
         //生成したソースを確認したいので、コンソールに直接出力してみる

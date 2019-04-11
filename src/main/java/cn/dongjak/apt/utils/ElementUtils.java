@@ -19,4 +19,22 @@ public class ElementUtils {
         }
         return lastElement;
     }
+
+
+    public static String getReadMethodName(Element element) {
+
+        //element.asType().toString()
+        return "get" + element.getSimpleName().toString().substring(0, 1).toUpperCase() + element.getSimpleName().toString().substring(1);
+    }
+
+
+    public static String getReadExpression(String expression) {
+        String[] expressions = expression.split("\\.");
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < expressions.length; i++) {
+            String name = expressions[i];
+            builder.append(".").append("get").append(name.substring(0, 1).toUpperCase()).append(name.substring(1)).append("()");
+        }
+        return builder.toString();
+    }
 }
