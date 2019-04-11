@@ -2,7 +2,9 @@ package cn.dongjak.apt.vo;
 
 import cn.dongjak.annotations.DbComment;
 import cn.dongjak.annotations.VO;
+import cn.dongjak.apt.utils.ElementUtils;
 import com.google.auto.service.AutoService;
+import com.google.common.collect.Sets;
 import com.squareup.javapoet.*;
 import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
@@ -11,6 +13,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.apache.commons.lang3.ArrayUtils;
+import org.apache.commons.lang3.StringUtils;
 
 import javax.annotation.processing.AbstractProcessor;
 import javax.annotation.processing.Filer;
@@ -103,7 +106,7 @@ public class VOAnnotationProcessor extends AbstractProcessor {
             voBuilder.addAnnotation(AnnotationSpec.builder(ApiModel.class).addMember("value", "$S", dbComment.value()).build());
 
         List<Element> fields = element.getEnclosedElements().stream().filter(o -> {
-            return o.getKind().isField() && !ArrayUtils.contains(vo.excludes(), o.getSimpleName().toString());
+            return o.getKind().isField() && !ArrayUtils.contains(vo.excludes(), o.getSimpleName().toString()) && Objects.isNull(((Element) o).getAnnotation(VO.Exclude.class));
         }).collect(Collectors.toList());
 
         fields.forEach(field -> {
@@ -114,11 +117,26 @@ public class VOAnnotationProcessor extends AbstractProcessor {
             voBuilder.addField(fieldSpecBuilder.build());
         });
 
+        Arrays.stream(vo.fields()).forEach(voField -> {
+            String expression = StringUtils.isNotBlank(voField.expression()) ? voField.expression() : voField.name();
+            Element fieldElement = ElementUtils.streamingGetElement(element, expression);
+            FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(ClassName.bestGuess(fieldElement.asType().toString()), fieldElement.getSimpleName().toString(), Modifier.PRIVATE);
+            voBuilder.addField(fieldSpecBuilder.build());
+            //Field field = ReflectUtils.streamingGetField()
+
+//            FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(ClassName.bestGuess(field.asType().toString()), field.getSimpleName().toString(), Modifier.PRIVATE);
+            //ReflectUtils.strea
+
+            //valueMap.put(screenProperty.name(), ReflectUtils.streamingGet(value, expression));
+
+        });
+
         TypeSpec validationGroupsInterface = voBuilder.addModifiers(Modifier.PUBLIC)
                 .build();
 
         JavaFile javaFile = JavaFile.builder(
-                element.getEnclosingElement().toString(), validationGroupsInterface).
+                StringUtils.isNotBlank(vo.packageName()) ? vo.packageName() :
+                        element.getEnclosingElement().toString(), validationGroupsInterface).
                 build();
 
         //生成したソースを確認したいので、コンソールに直接出力してみる
@@ -189,10 +207,8 @@ public class VOAnnotationProcessor extends AbstractProcessor {
      * @return 注解器所支持的注解类型集合，如果没有这样的类型，则返回一个空集合
      */
     @Override
-    public Set getSupportedAnnotationTypes() {
-        Set annotataions = new LinkedHashSet();
-        annotataions.add(VO.class.getCanonicalName());
-        return annotataions;
+    public Set<String> getSupportedAnnotationTypes() {
+        return Sets.newHashSet(VO.class.getCanonicalName());
     }
 
     /**
