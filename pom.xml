@@ -60,9 +60,9 @@
         </dependency>
 
         <dependency>
-            <groupId>cn.dongjak</groupId>
+            <groupId>com.github.cruldra</groupId>
             <artifactId>dongjak-annotations</artifactId>
-            <version>1.0-SNAPSHOT</version>
+            <version>85764ab297</version>
         </dependency>
     </dependencies>
 
