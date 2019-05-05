@@ -62,7 +62,7 @@
         <dependency>
             <groupId>com.github.cruldra</groupId>
             <artifactId>dongjak-annotations</artifactId>
-            <version>85764ab297</version>
+            <version>afeaf1e9d4</version>
         </dependency>
     </dependencies>
 

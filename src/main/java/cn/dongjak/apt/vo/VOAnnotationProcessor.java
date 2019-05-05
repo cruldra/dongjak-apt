@@ -1,8 +1,11 @@
 package cn.dongjak.apt.vo;
 
 import cn.dongjak.annotations.DbComment;
-import cn.dongjak.annotations.VO;
+import cn.dongjak.annotations.vo.UseVo;
+import cn.dongjak.annotations.vo.VO;
+import cn.dongjak.annotations.vo.VOS;
 import cn.dongjak.apt.utils.ElementUtils;
+import cn.dongjak.apt.utils.ReflectionUtils;
 import com.google.auto.service.AutoService;
 import com.google.common.collect.Sets;
 import com.squareup.javapoet.*;
@@ -26,6 +29,7 @@ import javax.lang.model.element.TypeElement;
 import javax.tools.Diagnostic;
 import java.io.IOException;
 import java.util.*;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 /**
@@ -33,6 +37,8 @@ import java.util.stream.Collectors;
  */
 @AutoService(VOAnnotationProcessor.class)
 public class VOAnnotationProcessor extends AbstractProcessor {
+
+    private static Logger logger = Logger.getLogger(VOAnnotationProcessor.class.getName());
     private Filer _filer;
 
     /**
@@ -66,10 +72,12 @@ public class VOAnnotationProcessor extends AbstractProcessor {
         try {
             for (TypeElement typeElement : annotations) {
                 for (Element element : roundEnv.getElementsAnnotatedWith(typeElement)) {
-                    VO valueObjectWrapper = element.getAnnotation(VO.class);
-                    if (valueObjectWrapper != null) {
-                        createFactoryClass(element, valueObjectWrapper);
-                    }
+                    VO voAnnotation = element.getAnnotation(VO.class);
+                    if (Objects.nonNull(voAnnotation))
+                        createSingleVo(element, voAnnotation);
+                    VOS vosAnnotation = element.getAnnotation(VOS.class);
+                    if (Objects.nonNull(vosAnnotation))
+                        createMultiVo(element, vosAnnotation);
                 }
             }
             processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE, "クラスファイル生成");
@@ -80,22 +88,28 @@ public class VOAnnotationProcessor extends AbstractProcessor {
         return false;
     }
 
-    private void createFactoryClass(Element element, VO vo) throws IOException {
-//        ArgumentInfo argInfo = getArgumentInfo(element);
+    private void createMultiVo(Element element, VOS vosAnnotation) {
+        for (VO vo : vosAnnotation.value()) {
+            try {
+                createSingleVo(element, vo);
+            } catch (IOException e) {
+                System.err.println("");
+                logger.severe(String.format("创建应用于场景[%s]的VO失败!", vo.sceneName()));
+            }
+        }
+    }
 
-//        MethodSpec.Builder builder = MethodSpec.methodBuilder("create")
-//                .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
-//                .returns(TypeName.get(element.asType()))
-//                .addStatement("return new $T(" + argInfo.join() + ")",
-//                        TypeName.get(element.asType()));
-//        for (String arg : argInfo.getArgNames()) {
-//            builder.addParameter(String.class, arg);
-//        }
-//        MethodSpec create = builder.build();
+    private void createSingleVo(Element element, VO vo) throws IOException {
+        String className = element.getSimpleName() + "VO";  //类名称
+        if (StringUtils.isNotBlank(vo.sceneName()))
+            className = element.getSimpleName() + "VOFor" + vo.sceneName();  //显示指定VO类名称
 
-        String className = element.getSimpleName() + "VO";
+        //创建类型声明
         TypeSpec.Builder voBuilder = TypeSpec.classBuilder(className);
 
+        /*
+        添加类注释
+         */
         voBuilder.addAnnotation(Data.class);
         voBuilder.addAnnotation(NoArgsConstructor.class);
         voBuilder.addAnnotation(AllArgsConstructor.class);
@@ -105,26 +119,51 @@ public class VOAnnotationProcessor extends AbstractProcessor {
         if (Objects.nonNull(dbComment))
             voBuilder.addAnnotation(AnnotationSpec.builder(ApiModel.class).addMember("value", "$S", dbComment.value()).build());
         StringBuilder codeBuilder = new StringBuilder("return $T.builder()");
-        List<Element> fields = element.getEnclosedElements().stream().filter(o -> {
-            return o.getKind().isField() && !ArrayUtils.contains(vo.excludes(), o.getSimpleName().toString()) && Objects.isNull(((Element) o).getAnnotation(VO.Exclude.class));
-        }).collect(Collectors.toList());
 
-        fields.forEach(field -> {
-            FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(ClassName.bestGuess(field.asType().toString()), field.getSimpleName().toString(), Modifier.PRIVATE);
-            DbComment fieldComment = field.getAnnotation(DbComment.class);
-            if (Objects.nonNull(fieldComment))
-                fieldSpecBuilder.addAnnotation(AnnotationSpec.builder(ApiModelProperty.class).addMember("value", "$S", fieldComment.value()).build());
-            voBuilder.addField(fieldSpecBuilder.build());
-            codeBuilder.append("\n").append(".").append(field.getSimpleName()).append("(").append("domain.").append(ElementUtils.getReadMethodName(field)).append("()").append(")");
+        if (!vo.onlyIncludeDefinedFields()) {
+            List<Element> fields = element.getEnclosedElements().stream().filter(o -> {
+                return o.getKind().isField(); //元素必须是一个字段
+            }).collect(Collectors.toList());
+            fields =
+                    fields.stream().filter(o -> {
+                        return !ArrayUtils.contains(vo.excludes(), o.getSimpleName().toString()) //不包含在excludes声明中
+                                && Objects.isNull(o.getAnnotation(VO.Exclude.class)); // 且该字段没有@Exclude标记
+                    }).collect(Collectors.toList());
+            fields.forEach(field -> {
+                //region 给类创建字段
+                FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(ClassName.bestGuess(field.asType().toString()), field.getSimpleName().toString(), Modifier.PRIVATE);
+                addFieldDoc(field, fieldSpecBuilder);
+                voBuilder.addField(fieldSpecBuilder.build());
+                //endregion
 
-        });
+                codeBuilder.append("\n").append(".").append(field.getSimpleName()).append("(").append("domain.").append(ElementUtils.getReadMethodName(field)).append("()").append(")");
+
+            });
+        }
 
         Arrays.stream(vo.fields()).forEach(voField -> {
             String expression = StringUtils.isNotBlank(voField.expression()) ? voField.expression() : voField.name();
             Element fieldElement = ElementUtils.streamingGetElement(element, expression);
-            FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(ClassName.bestGuess(fieldElement.asType().toString()), fieldElement.getSimpleName().toString(), Modifier.PRIVATE);
+            TypeName typeName;
+            ElementUtils.TypeDesc typeDesc = ElementUtils.getElementTypeDesc(fieldElement);
+            UseVo useVoAnnotation = fieldElement.getAnnotation(UseVo.class);
+            if (typeDesc.isCollection()) {
+                if (Objects.isNull(useVoAnnotation))
+                    typeName = ParameterizedTypeName.get(ClassName.bestGuess(typeDesc.getClassName()),
+                            typeDesc.getTypeParams().stream().map(ClassName::bestGuess).collect(Collectors.toSet()).toArray(new TypeName[]{}));
+                else typeName = ParameterizedTypeName.get(ClassName.bestGuess(typeDesc.getClassName()),
+                        ClassName.bestGuess(useVoAnnotation.value()));
+            } else
+                typeName = ClassName.bestGuess(fieldElement.asType().toString());
+            FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(typeName, voField.name(), Modifier.PRIVATE);
+            addFieldDoc(fieldElement, fieldSpecBuilder);
             voBuilder.addField(fieldSpecBuilder.build());
-            codeBuilder.append("\n").append(".").append(fieldElement.getSimpleName()).append("(").append("domain").append(ElementUtils.getReadExpression(expression)).append(")");
+            if (typeDesc.isCollection() && Objects.nonNull(useVoAnnotation)) {
+                codeBuilder.append("\n").append(".").append(fieldElement.getSimpleName()).append("(")
+                        .append(ReflectionUtils.getClassSimpleName(useVoAnnotation.value())).append(".from").append(typeDesc.getCollectionType())
+                        .append("(domain").append(ElementUtils.getReadExpression(expression)).append("))");
+            } else
+                codeBuilder.append("\n").append(".").append(fieldElement.getSimpleName()).append("(").append("domain").append(ElementUtils.getReadExpression(expression)).append(")");
         });
         codeBuilder.append("\n.build()");
         String packageName = StringUtils.isNotBlank(vo.packageName()) ? vo.packageName() :
@@ -144,6 +183,13 @@ public class VOAnnotationProcessor extends AbstractProcessor {
                 .addStatement("return collection.stream().map($T::from).collect($T.toList())", ClassName.get(packageName, className), ClassName.bestGuess("java.util.stream.Collectors"))
                 .build());
 
+
+        voBuilder.addMethod(MethodSpec.methodBuilder("fromList").addModifiers(Modifier.PUBLIC, Modifier.STATIC)
+                .returns(ParameterizedTypeName.get(ClassName.bestGuess("java.util.List"), ClassName.get(packageName, className)))
+                .addParameter(ParameterizedTypeName.get(ClassName.bestGuess("java.util.List"), ClassName.bestGuess(element.asType().toString())), "list")
+                .addStatement("return list.stream().map($T::from).collect($T.toList())", ClassName.get(packageName, className), ClassName.bestGuess("java.util.stream.Collectors"))
+                .build());
+
         TypeSpec validationGroupsInterface = voBuilder.addModifiers(Modifier.PUBLIC)
                 .build();
 
@@ -156,6 +202,14 @@ public class VOAnnotationProcessor extends AbstractProcessor {
 
         javaFile.writeTo(_filer);
 
+    }
+
+    private void addFieldDoc(Element fieldElement, FieldSpec.Builder fieldSpecBuilder) {
+        DbComment dbCommentAnnotation = fieldElement.getAnnotation(DbComment.class);
+        if (Objects.nonNull(dbCommentAnnotation)) {
+            fieldSpecBuilder.addAnnotation(AnnotationSpec.builder(ApiModelProperty.class).addMember("value", "$S", dbCommentAnnotation.value()).build());
+            fieldSpecBuilder.addJavadoc(dbCommentAnnotation.value());
+        }
     }
 
     private String getPackageName(Element element) {
@@ -219,7 +273,8 @@ public class VOAnnotationProcessor extends AbstractProcessor {
      */
     @Override
     public Set<String> getSupportedAnnotationTypes() {
-        return Sets.newHashSet(VO.class.getCanonicalName());
+        return Sets.newHashSet(VO.class.getCanonicalName(),
+                VOS.class.getCanonicalName());
     }
 
     /**
