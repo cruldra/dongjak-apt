@@ -147,12 +147,14 @@ public class VOAnnotationProcessor extends AbstractProcessor {
             TypeName typeName;
             ElementUtils.TypeDesc typeDesc = ElementUtils.getElementTypeDesc(fieldElement);
             UseVo useVoAnnotation = fieldElement.getAnnotation(UseVo.class);
-            if (typeDesc.isCollection()) {
+            if (typeDesc.isCollection()) { //该字段是一个集合类型
                 if (Objects.isNull(useVoAnnotation))
                     typeName = ParameterizedTypeName.get(ClassName.bestGuess(typeDesc.getClassName()),
                             typeDesc.getTypeParams().stream().map(ClassName::bestGuess).collect(Collectors.toSet()).toArray(new TypeName[]{}));
                 else typeName = ParameterizedTypeName.get(ClassName.bestGuess(typeDesc.getClassName()),
                         ClassName.bestGuess(useVoAnnotation.value()));
+            } else if (Objects.nonNull(useVoAnnotation)) {
+                typeName = ClassName.bestGuess(useVoAnnotation.value());
             } else
                 typeName = ClassName.bestGuess(fieldElement.asType().toString());
             FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(typeName, voField.name(), Modifier.PRIVATE);
@@ -161,6 +163,10 @@ public class VOAnnotationProcessor extends AbstractProcessor {
             if (typeDesc.isCollection() && Objects.nonNull(useVoAnnotation)) {
                 codeBuilder.append("\n").append(".").append(fieldElement.getSimpleName()).append("(")
                         .append(ReflectionUtils.getClassSimpleName(useVoAnnotation.value())).append(".from").append(typeDesc.getCollectionType())
+                        .append("(domain").append(ElementUtils.getReadExpression(expression)).append("))");
+            } else if (Objects.nonNull(useVoAnnotation)) {
+                codeBuilder.append("\n").append(".").append(fieldElement.getSimpleName()).append("(")
+                        .append(ReflectionUtils.getClassSimpleName(useVoAnnotation.value())).append(".from")
                         .append("(domain").append(ElementUtils.getReadExpression(expression)).append("))");
             } else
                 codeBuilder.append("\n").append(".").append(fieldElement.getSimpleName()).append("(").append("domain").append(ElementUtils.getReadExpression(expression)).append(")");
