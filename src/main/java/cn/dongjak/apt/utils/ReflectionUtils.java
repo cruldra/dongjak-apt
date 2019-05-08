@@ -30,4 +30,18 @@ public class ReflectionUtils {
     public static String getClassSimpleName(String className) {
         return className.substring(className.lastIndexOf(".") + 1);
     }
+
+
+    public static Object streamingGet(Object target, String expression) {
+        Object last = target;
+
+        for (String fieldName : expression.split("\\.")) {
+            last = getFieldValue(last, fieldName, Object.class);
+        }
+
+        return last;
+    }
+
+
+
 }

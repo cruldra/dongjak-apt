@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import javax.lang.model.element.Element;
+import javax.lang.model.element.TypeElement;
 import javax.lang.model.type.TypeMirror;
 import java.lang.reflect.Field;
 import java.util.*;
@@ -21,8 +22,16 @@ public class ElementUtils {
     public static Element streamingGetElement(Element element, String expression) {
         Element lastElement = element;
         String[] expressions = expression.split("\\.");
-        for (String name : expressions) {
-            lastElement = findFieldElement(lastElement, name);
+
+        for (int i = 0; i < expressions.length; i++) {
+            String expstr = expressions[i];
+            lastElement = findFieldElement(lastElement, expstr);
+
+            if (expression.contains(".")) {
+                if (!(lastElement instanceof TypeElement) && i < expressions.length - 1)
+                    lastElement = ReflectionUtils.getFieldValue(lastElement.asType(), "tsym", TypeElement.class);
+            }
+
         }
         return lastElement;
     }
@@ -41,7 +50,8 @@ public class ElementUtils {
 
     @SuppressWarnings("unchecked")
     private static Element getSuperClassElement(Element element) {
-        if (!element.getKind().isClass()) throw new RuntimeException(element + " is not a class element!");
+        if (!element.getKind().isClass())
+            throw new RuntimeException(element + " is not a class element!");
         Optional<Field> superFieldOptional = getAllFields(element.asType().getClass(), withName("supertype_field")).stream().findFirst();
         if (superFieldOptional.isPresent()) {
             try {
@@ -58,6 +68,7 @@ public class ElementUtils {
     public static String getReadMethodName(Element element) {
         return "get" + element.getSimpleName().toString().substring(0, 1).toUpperCase() + element.getSimpleName().toString().substring(1);
     }
+
 
 
     public static String getReadExpression(String expression) {

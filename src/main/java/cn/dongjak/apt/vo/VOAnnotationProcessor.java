@@ -11,10 +11,7 @@ import com.google.common.collect.Sets;
 import com.squareup.javapoet.*;
 import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
 
@@ -26,6 +23,10 @@ import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
+import javax.persistence.ManyToMany;
+import javax.persistence.ManyToOne;
+import javax.persistence.OneToMany;
+import javax.persistence.OneToOne;
 import javax.tools.Diagnostic;
 import java.io.IOException;
 import java.util.*;
@@ -99,9 +100,35 @@ public class VOAnnotationProcessor extends AbstractProcessor {
         }
     }
 
+
+    @Data
+    @Builder
+    private static class FieldItem {
+        private String name;
+
+        @EqualsAndHashCode.Exclude
+        private String expression;
+
+
+        public static FieldItem formElement(Element element) {
+            return FieldItem.builder().name(element.getSimpleName().toString()).build();
+        }
+
+        public static FieldItem formField(VO.Field field) {
+            return FieldItem.builder().name(field.name()).expression(field.expression()).build();
+        }
+    }
+
+
+    private String stringFirstUpper(String string) {
+        return string.substring(0, 1).toUpperCase() + string.substring(1);
+    }
+
     private void createSingleVo(Element element, VO vo) throws IOException {
         String className = element.getSimpleName() + "VO";  //类名称
-        if (StringUtils.isNotBlank(vo.sceneName()))
+        if (vo.usedExtjsGrid())
+            className = element.getSimpleName() + "VOForExtjsGrid";
+        else if (StringUtils.isNotBlank(vo.sceneName()))
             className = element.getSimpleName() + "VOFor" + vo.sceneName();  //显示指定VO类名称
 
         //创建类型声明
@@ -118,31 +145,37 @@ public class VOAnnotationProcessor extends AbstractProcessor {
         DbComment dbComment = element.getAnnotation(DbComment.class);
         if (Objects.nonNull(dbComment))
             voBuilder.addAnnotation(AnnotationSpec.builder(ApiModel.class).addMember("value", "$S", dbComment.value()).build());
-        StringBuilder codeBuilder = new StringBuilder("return $T.builder()");
 
-        if (!vo.onlyIncludeDefinedFields()) {
-            List<Element> fields = element.getEnclosedElements().stream().filter(o -> {
-                return o.getKind().isField(); //元素必须是一个字段
-            }).collect(Collectors.toList());
-            fields =
-                    fields.stream().filter(o -> {
-                        return !ArrayUtils.contains(vo.excludes(), o.getSimpleName().toString()) //不包含在excludes声明中
-                                && Objects.isNull(o.getAnnotation(VO.Exclude.class)); // 且该字段没有@Exclude标记
-                    }).collect(Collectors.toList());
-            fields.forEach(field -> {
-                //region 给类创建字段
-                FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(ClassName.bestGuess(field.asType().toString()), field.getSimpleName().toString(), Modifier.PRIVATE);
-                addFieldDoc(field, fieldSpecBuilder);
-                voBuilder.addField(fieldSpecBuilder.build());
-                //endregion
 
-                codeBuilder.append("\n").append(".").append(field.getSimpleName()).append("(").append("domain.").append(ElementUtils.getReadMethodName(field)).append("()").append(")");
+        Set<FieldItem> fieldItems = Sets.newHashSet();
+        if (vo.usedExtjsGrid()) {
+            fieldItems.addAll(Arrays.stream(vo.fields()).map(FieldItem::formField).collect(Collectors.toSet()));
+            fieldItems.addAll(element.getEnclosedElements().stream().filter(o -> {
+                return o.getKind().isField()
+                        && Objects.isNull(o.getAnnotation(OneToMany.class))
+                        && Objects.isNull(o.getAnnotation(ManyToOne.class))
+                        && Objects.isNull(o.getAnnotation(OneToOne.class))
+                        && Objects.isNull(o.getAnnotation(ManyToMany.class));
+            }).map(FieldItem::formElement).collect(Collectors.toSet()));
 
-            });
+        } else {
+            fieldItems.addAll(Arrays.stream(vo.fields()).map(FieldItem::formField).collect(Collectors.toSet()));
+            if (!vo.onlyIncludeDefinedFields()) {
+                fieldItems.addAll(element.getEnclosedElements().stream().filter(o -> {
+                    return o.getKind().isField()
+                            && !ArrayUtils.contains(vo.excludes(), o.getSimpleName().toString()) //不包含在excludes声明中
+                            && Objects.isNull(o.getAnnotation(VO.Exclude.class)); // 且该字段没有@Exclude标记
+                }).map(FieldItem::formElement).collect(Collectors.toSet()));
+
+            }
+
         }
 
-        Arrays.stream(vo.fields()).forEach(voField -> {
-            String expression = StringUtils.isNotBlank(voField.expression()) ? voField.expression() : voField.name();
+        StringBuilder fromMethodReturnBuilder = new StringBuilder();
+        fromMethodReturnBuilder.append("$T<$T> optional = Optional.ofNullable(domain);\n");
+        fromMethodReturnBuilder.append("return $T.builder()");
+        fieldItems.forEach(voField -> {
+            String expression = StringUtils.isNotBlank(voField.getExpression()) ? voField.getExpression() : voField.getName();
             Element fieldElement = ElementUtils.streamingGetElement(element, expression);
             TypeName typeName;
             ElementUtils.TypeDesc typeDesc = ElementUtils.getElementTypeDesc(fieldElement);
@@ -157,21 +190,37 @@ public class VOAnnotationProcessor extends AbstractProcessor {
                 typeName = ClassName.bestGuess(useVoAnnotation.value());
             } else
                 typeName = ClassName.bestGuess(fieldElement.asType().toString());
-            FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(typeName, voField.name(), Modifier.PRIVATE);
+            FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(typeName, voField.getName(), Modifier.PRIVATE);
             addFieldDoc(fieldElement, fieldSpecBuilder);
             voBuilder.addField(fieldSpecBuilder.build());
+
+
+            //.status(optional.map(MCpConfig::getStatus).orElse(Defaults.defaultValue()))
+            //.status(domain.getStatus())
             if (typeDesc.isCollection() && Objects.nonNull(useVoAnnotation)) {
-                codeBuilder.append("\n").append(".").append(fieldElement.getSimpleName()).append("(")
+                fromMethodReturnBuilder.append("\n").append(".").append(voField.getName()).append("(")
                         .append(ReflectionUtils.getClassSimpleName(useVoAnnotation.value())).append(".from").append(typeDesc.getCollectionType())
                         .append("(domain").append(ElementUtils.getReadExpression(expression)).append("))");
             } else if (Objects.nonNull(useVoAnnotation)) {
-                codeBuilder.append("\n").append(".").append(fieldElement.getSimpleName()).append("(")
+                fromMethodReturnBuilder.append("\n").append(".").append(voField.getName()).append("(")
                         .append(ReflectionUtils.getClassSimpleName(useVoAnnotation.value())).append(".from")
                         .append("(domain").append(ElementUtils.getReadExpression(expression)).append("))");
-            } else
-                codeBuilder.append("\n").append(".").append(fieldElement.getSimpleName()).append("(").append("domain").append(ElementUtils.getReadExpression(expression)).append(")");
+            } else {
+                fromMethodReturnBuilder.append("\n").append(".").append(voField.getName()).append("(");//.append("domain").append(ElementUtils.getReadExpression(expression)).append(")");
+                String[] expressions = expression.split("\\.");
+
+                fromMethodReturnBuilder.append(String.format("optional.map(%s::%s)"
+                        , ClassName.bestGuess(ReflectionUtils.getClassSimpleName(element.asType().toString()))
+                        , "get" + stringFirstUpper(expressions[0])));
+                for (int i = 1; i < expressions.length; i++)
+                    fromMethodReturnBuilder.append(String.format(".map(val->{return val.%s();})", "get" + stringFirstUpper(expressions[i])));
+                fromMethodReturnBuilder.append(String.format(".orElse(com.google.common.base.Defaults.defaultValue(%s.class))", typeName));
+                fromMethodReturnBuilder.append(")");
+
+
+            }
         });
-        codeBuilder.append("\n.build()");
+        fromMethodReturnBuilder.append("\n.build()");
         String packageName = StringUtils.isNotBlank(vo.packageName()) ? vo.packageName() :
                 element.getEnclosingElement().toString();
 
@@ -179,7 +228,10 @@ public class VOAnnotationProcessor extends AbstractProcessor {
         voBuilder.addMethod(MethodSpec.methodBuilder("from").addModifiers(Modifier.PUBLIC, Modifier.STATIC)
                 .returns(ClassName.get(packageName, className))
                 .addParameter(ClassName.bestGuess(element.asType().toString()), "domain")
-                .addStatement(codeBuilder.toString(), ClassName.get(packageName, className))
+                .addStatement(fromMethodReturnBuilder.toString(),
+                        ClassName.bestGuess(Optional.class.getName()),
+                        ClassName.bestGuess(element.asType().toString()),
+                        ClassName.get(packageName, className))
                 .build());
 
 
@@ -209,6 +261,7 @@ public class VOAnnotationProcessor extends AbstractProcessor {
         javaFile.writeTo(_filer);
 
     }
+
 
     private void addFieldDoc(Element fieldElement, FieldSpec.Builder fieldSpecBuilder) {
         DbComment dbCommentAnnotation = fieldElement.getAnnotation(DbComment.class);
