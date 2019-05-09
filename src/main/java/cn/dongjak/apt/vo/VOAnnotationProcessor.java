@@ -176,7 +176,7 @@ public class VOAnnotationProcessor extends AbstractProcessor {
         fromMethodReturnBuilder.append("return $T.builder()");
         fieldItems.forEach(voField -> {
             String expression = StringUtils.isNotBlank(voField.getExpression()) ? voField.getExpression() : voField.getName();
-            Element fieldElement = ElementUtils.streamingGetElement(element, expression);
+            Element fieldElement = ElementUtils.streamingGetFieldElement(element, expression);
             TypeName typeName;
             ElementUtils.TypeDesc typeDesc = ElementUtils.getElementTypeDesc(fieldElement);
             UseVo useVoAnnotation = fieldElement.getAnnotation(UseVo.class);

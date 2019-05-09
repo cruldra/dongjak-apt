@@ -7,6 +7,7 @@ import lombok.Data;
 
 import javax.lang.model.element.Element;
 import javax.lang.model.element.TypeElement;
+import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 import java.lang.reflect.Field;
 import java.util.*;
@@ -16,24 +17,40 @@ import java.util.stream.Collectors;
 import static org.reflections.ReflectionUtils.getAllFields;
 import static org.reflections.ReflectionUtils.withName;
 
+
+/**
+ * <a href="https://mvnrepository.com/artifact/org.jvnet.sorcerer/sorcerer-javac">Javac Compiler</a>
+ */
 public class ElementUtils {
     private static Logger logger = Logger.getLogger(ElementUtils.class.getName());
 
-    public static Element streamingGetElement(Element element, String expression) {
-        Element lastElement = element;
+
+    /**
+     * 获取给定路径上的字段元素
+     *
+     * @param typeElement 类元素
+     * @param expression  字段路径表达式
+     * @return 字段元素
+     */
+    public static Element streamingGetFieldElement(Element typeElement, String expression) {
+        Element fieldElement = typeElement;
         String[] expressions = expression.split("\\.");
 
         for (int i = 0; i < expressions.length; i++) {
             String expstr = expressions[i];
-            lastElement = findFieldElement(lastElement, expstr);
+            fieldElement = findFieldElement(fieldElement, expstr);
 
             if (expression.contains(".")) {
-                if (!(lastElement instanceof TypeElement) && i < expressions.length - 1)
-                    lastElement = ReflectionUtils.getFieldValue(lastElement.asType(), "tsym", TypeElement.class);
+                if (!(fieldElement instanceof TypeElement) && i < expressions.length - 1) {
+                    if (fieldElement.asType().getKind() == TypeKind.TYPEVAR) {
+                        fieldElement = typeElement;
+                    } else
+                        fieldElement = ReflectionUtils.getFieldValue(fieldElement.asType(), "tsym", TypeElement.class);
+                }
             }
 
         }
-        return lastElement;
+        return fieldElement;
     }
 
     private static Element findFieldElement(Element element, String fieldName) {
@@ -68,7 +85,6 @@ public class ElementUtils {
     public static String getReadMethodName(Element element) {
         return "get" + element.getSimpleName().toString().substring(0, 1).toUpperCase() + element.getSimpleName().toString().substring(1);
     }
-
 
 
     public static String getReadExpression(String expression) {
