@@ -23,10 +23,7 @@ import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
-import javax.persistence.ManyToMany;
-import javax.persistence.ManyToOne;
-import javax.persistence.OneToMany;
-import javax.persistence.OneToOne;
+import javax.persistence.*;
 import javax.tools.Diagnostic;
 import java.io.IOException;
 import java.util.*;
@@ -155,7 +152,8 @@ public class VOAnnotationProcessor extends AbstractProcessor {
                         && Objects.isNull(o.getAnnotation(OneToMany.class))
                         && Objects.isNull(o.getAnnotation(ManyToOne.class))
                         && Objects.isNull(o.getAnnotation(OneToOne.class))
-                        && Objects.isNull(o.getAnnotation(ManyToMany.class));
+                        && Objects.isNull(o.getAnnotation(ManyToMany.class))
+                        && Objects.isNull(o.getAnnotation(Transient.class));
             }).map(FieldItem::formElement).collect(Collectors.toSet()));
 
         } else {
@@ -164,7 +162,8 @@ public class VOAnnotationProcessor extends AbstractProcessor {
                 fieldItems.addAll(element.getEnclosedElements().stream().filter(o -> {
                     return o.getKind().isField()
                             && !ArrayUtils.contains(vo.excludes(), o.getSimpleName().toString()) //不包含在excludes声明中
-                            && Objects.isNull(o.getAnnotation(VO.Exclude.class)); // 且该字段没有@Exclude标记
+                            && Objects.isNull(o.getAnnotation(VO.Exclude.class)) // 且该字段没有@Exclude标记
+                            && Objects.isNull(o.getAnnotation(Transient.class)); // 且该字段没有@Transient标记
                 }).map(FieldItem::formElement).collect(Collectors.toSet()));
 
             }
