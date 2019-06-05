@@ -20,6 +20,7 @@ import javax.annotation.processing.Filer;
 import javax.annotation.processing.ProcessingEnvironment;
 import javax.annotation.processing.RoundEnvironment;
 import javax.lang.model.SourceVersion;
+import javax.lang.model.element.AnnotationMirror;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
@@ -191,6 +192,7 @@ public class VOAnnotationProcessor extends AbstractProcessor {
                 typeName = ClassName.bestGuess(fieldElement.asType().toString());
             FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(typeName, voField.getName(), Modifier.PRIVATE);
             addFieldDoc(fieldElement, fieldSpecBuilder);
+            copyFastJsonAnnotations(fieldElement, fieldSpecBuilder);
             voBuilder.addField(fieldSpecBuilder.build());
 
 
@@ -259,6 +261,16 @@ public class VOAnnotationProcessor extends AbstractProcessor {
 
         javaFile.writeTo(_filer);
 
+    }
+
+    private void copyFastJsonAnnotations(Element fieldElement, FieldSpec.Builder fieldSpecBuilder) {
+        fieldElement.getAnnotationMirrors().stream().filter(o -> {
+            return ArrayUtils.contains(new String[]{
+                    "com.alibaba.fastjson.annotation.JSONField"
+            }, ((AnnotationMirror) o).getAnnotationType().toString());
+        }).forEach(o -> {
+            fieldSpecBuilder.addAnnotation(AnnotationSpec.get(o));
+        });
     }
 
 
