@@ -77,12 +77,6 @@
             <version>2.2</version>
             <scope>provided</scope>
         </dependency>
-
-        <dependency>
-            <groupId>com.github.cruldra</groupId>
-            <artifactId>dongjak-annotations</artifactId>
-            <version>113994b556</version>
-        </dependency>
     </dependencies>
 
     <build>

@@ -107,13 +107,20 @@ public class VOAnnotationProcessor extends AbstractProcessor {
         @EqualsAndHashCode.Exclude
         private String expression;
 
+        @Builder.Default
+        private boolean extendFastJsonAnnotation = true;
+
 
         public static FieldItem formElement(Element element) {
             return FieldItem.builder().name(element.getSimpleName().toString()).build();
         }
 
         public static FieldItem formField(VO.Field field) {
-            return FieldItem.builder().name(field.name()).expression(field.expression()).build();
+            return FieldItem.builder()
+                    .name(field.name())
+                    .expression(field.expression())
+                    .extendFastJsonAnnotation(field.extendFastJsonAnnotation())
+                    .build();
         }
     }
 
@@ -192,7 +199,8 @@ public class VOAnnotationProcessor extends AbstractProcessor {
                 typeName = ClassName.bestGuess(fieldElement.asType().toString());
             FieldSpec.Builder fieldSpecBuilder = FieldSpec.builder(typeName, voField.getName(), Modifier.PRIVATE);
             addFieldDoc(fieldElement, fieldSpecBuilder);
-            copyFastJsonAnnotations(fieldElement, fieldSpecBuilder);
+            if (voField.extendFastJsonAnnotation)
+                setFastJson(fieldElement, fieldSpecBuilder);
             voBuilder.addField(fieldSpecBuilder.build());
 
 
@@ -255,15 +263,13 @@ public class VOAnnotationProcessor extends AbstractProcessor {
         JavaFile javaFile = JavaFile.builder(packageName, validationGroupsInterface).
                 build();
 
-        //生成したソースを確認したいので、コンソールに直接出力してみる
-        System.out.println();
-        System.out.println(javaFile);
+        System.out.println("创建值包装对象:" + className);
 
         javaFile.writeTo(_filer);
 
     }
 
-    private void copyFastJsonAnnotations(Element fieldElement, FieldSpec.Builder fieldSpecBuilder) {
+    private void setFastJson(Element fieldElement, FieldSpec.Builder fieldSpecBuilder) {
         fieldElement.getAnnotationMirrors().stream().filter(o -> {
             return ArrayUtils.contains(new String[]{
                     "com.alibaba.fastjson.annotation.JSONField"
