@@ -38,7 +38,13 @@ public class ElementUtils {
 
         for (int i = 0; i < expressions.length; i++) {
             String expstr = expressions[i];
+
+            Element lastTargetElement = fieldElement;
             fieldElement = findFieldElement(fieldElement, expstr);
+
+            if (fieldElement == null)
+                throw new RuntimeException(String.format("在%s上执行路径表达式%s时发生错误,因为在%s上找不到字段%s", typeElement.getSimpleName(),
+                        expression, lastTargetElement.getSimpleName(), expstr));
 
             if (expression.contains(".")) {
                 if (!(fieldElement instanceof TypeElement) && i < expressions.length - 1) {
